@@ -1,0 +1,108 @@
+---
+title: "xkcd plot of german weather"
+output: html_document
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r}
+library(leaflet)
+library(htmltools)
+library(tidyverse)
+```
+
+So [Maële Salmon](http://www.masalmon.eu/2017/11/16/wheretoliveus/) started this trend how to determine your city of choice based on your climate preference, inspired by [this xkcd graph](https://xkcd.com/1916/). We already know that the [Spanish](https://twitter.com/claudiaguirao/status/931615734521909248) islands are our all-time favorite (you could have asked the German tourists) that you really should only go to [Iceland](https://twitter.com/matamix/status/932192147062784000) because of the landscape and that the weather is the same in the [Netherlands](https://twitter.com/RMHoge/status/932526164668829696), no matter where you go.
+
+Different to the above mentioned analysis, we just take a look at the temperature to determine the ideal german city. The reason for this is the way the German Meteorological Service provides data. You will certainly get the necessary data to calculate the [humidex](https://en.wikipedia.org/wiki/Humidex), but the time I want to put into this small project is limited. For this reason, I reduce the analysis to the data set of average temperatures, downloaded from the [open data platform of the dwd](ftp://ftp-cdc.dwd.de/pub/CDC/regional_averages_DE/).
+
+If you dont know, where Germany is located just a simple reminder: 
+
+```{r}
+# Set coordinates (http://latitude.to/map/de/germany)
+lng = 10.4541194
+lat = 51.1642292
+
+leaflet() %>% addTiles() %>%
+  setView(lng=lng, lat=lat, zoom=4) %>%
+  addProviderTiles(providers$Stamen.Toner) %>%
+  addMarkers(lng=lng, lat=lat, 
+             label = paste0("Coordinates: ",as.character(lat)," ",as.character(lng)))
+```
+
+## Import the Data
+
+We have the seasonal average temperature as well as precipitation of the german federal states, derived from the gridded fields covering Germany for the period 1881 - 2017. 
+```{r}
+rm(list=ls())
+air_temp <- read.csv("data/air_temperature_mean.txt", sep=";")
+air_temp %>% gather(key = "location", value = "air_temp", -Jahr, -season) -> air_temp
+
+rain <- read.csv("data/rain.txt", sep=";")
+rain %>% gather(key = "location", value = "rain", -Jahr, -season) -> rain
+```
+
+## plot like xkcd using shiny
+
+I had to manually download the [xkcd font](http://simonsoftware.se/other/xkcd.ttf) and copy it to the font app on my Mac.
+
+```{r}
+library(xkcd)
+library(extrafont)
+library(ggrepel)
+```
+
+```{r some data preperations}
+seas <- c("summer", "winter")
+delete <- c("Deutschland", "X")
+air_temp %>% 
+  filter(season %in% seas) %>%
+  filter(!location %in% delete) %>%
+  #filter(Jahr == 2016) %>%
+  spread(season, air_temp) %>%
+  filter(!is.na(winter)) %>%
+  filter(!is.na(summer)) -> plot.df
+```
+
+```{r}
+library(shiny)
+library(nominatim)
+library(shinydashboard)
+```
+
+```{r, echo = FALSE}
+
+ui <- shinyUI(
+  fluidPage(
+    sliderInput("year", "Select year",
+                min=1882, max=2016, value=1),
+    plotOutput("scatter")
+             )
+           )
+
+server <- function(input, output) {
+  output$scatter <- renderPlot({
+    xrange <- range(plot.df$summer[plot.df$Jahr==input$year])
+    yrange <- range(plot.df$winter[plot.df$Jahr==input$year])
+
+    plot.df %>%
+      filter(Jahr == input$year) %>%
+      ggplot(aes(summer, winter)) +
+      geom_point() +
+      geom_text_repel(aes(label = location), family = "xkcd", 
+                   max.iter = 50000, size = 4) +
+      ggtitle("Where to live in Germany \nbased on your temperature preferences",
+          subtitle = "Data from DWD") +
+      xlab("Summer mean temperature in Celsius degrees")+
+      ylab("Winter mean temperature in Celsius degrees") +
+      xkcdaxis(xrange = xrange,
+           yrange = yrange)+
+      theme_xkcd() +
+      theme(text = element_text(size = 13, family = "xkcd"))
+  })
+}
+
+shinyApp(ui, server, options = list(height=500))
+```
